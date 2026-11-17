@@ -63,6 +63,68 @@
       </tbody>
     </table>
 
+    <section class="drill-link" data-drill-link>
+      <header class="drill-link-head">
+        <div>
+          <h3>下钻结果与筛选结果明细联动</h3>
+          <p class="muted">
+            选中的下钻路径复用筛选结果明细的命中行；筛选侧重验后，这里保留新版本命中行和来源版本号。
+          </p>
+        </div>
+        <label class="filter-item inline">
+          <span>下钻路径</span>
+          <select v-model="selectedDrill" @change="loadDrill">
+            <option v-for="row in rows" :key="String(row.id)" :value="String(row['路径编号'] ?? '')">
+              {{ row['路径编号'] }}
+            </option>
+          </select>
+        </label>
+      </header>
+
+      <div v-if="drillSnapshot" class="drill-summary">
+        <span class="badge">数据集 {{ drillSnapshot.datasetCode }}</span>
+        <span class="badge">命中行 {{ drillSnapshot.hitRows.length }}</span>
+        <span class="badge">保留版本 {{ drillSnapshot.retainedVersions.map((v) => `v${v}`).join('、') || '—' }}</span>
+        <span class="badge">索引 #{{ drillIndexRevision }}</span>
+      </div>
+
+      <table v-if="drillSnapshot" class="data-table compact">
+        <thead>
+          <tr>
+            <th>序号</th>
+            <th>行标识</th>
+            <th>来源规则</th>
+            <th>来源结果版本</th>
+            <th>命中值</th>
+            <th>保留时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in drillSnapshot.hitRows" :key="`${row.sourceRuleCode}-${row.rowId}`">
+            <td>{{ row.position }}</td>
+            <td>{{ row.rowId }}</td>
+            <td>{{ row.sourceRuleCode }}</td>
+            <td>v{{ row.sourceResultVersion }}</td>
+            <td>{{ row.matchValue ?? '—' }}</td>
+            <td>{{ formatTime(row.retainedAt) }}</td>
+          </tr>
+          <tr v-if="!drillSnapshot.hitRows.length">
+            <td colspan="6" class="empty-state">该下钻路径还没有命中行，可先在数据筛选页提交规则</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div v-if="linkedResults.length" class="linked-results">
+        <FilterResultDetail
+          v-for="result in linkedResults"
+          :key="result.resultId"
+          :result="result"
+          :columns="drillColumns"
+        />
+      </div>
+      <p v-else class="empty-state">该数据集还没有可回看的筛选结果明细</p>
+    </section>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条多维下钻记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -80,6 +142,9 @@ import {
   runAction as applyAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
+import FilterResultDetail from '@/components/FilterResultDetail.vue'
+import { loadDrillWorkspace } from '@/api/local-service'
+import type { DrillSnapshot, FilterResultDetail as ResultDetail } from '@/data/filter-types'
 
 const meta = moduleMeta('drill')
 const columns = ["路径编号", "起点维度", "下钻层数", "层级维度列表", "聚合指标", "默认展开层", "排序方向", "最多展示行数"]
@@ -92,6 +157,11 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const selectedDrill = ref('')
+const drillSnapshot = ref<DrillSnapshot | null>(null)
+const linkedResults = ref<ResultDetail[]>([])
+const drillIndexRevision = ref(0)
+const drillColumns = ref<string[]>([])
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -133,5 +203,60 @@ function reload() {
   }
 }
 
-onMounted(reload)
+function loadDrill() {
+  if (!selectedDrill.value) {
+    drillSnapshot.value = null
+    linkedResults.value = []
+    return
+  }
+  const payload = loadDrillWorkspace(selectedDrill.value)
+  drillSnapshot.value = payload.snapshot
+  linkedResults.value = payload.results
+  drillIndexRevision.value = payload.indexRevision
+  const first = payload.results[0]?.hitRows[0]
+  drillColumns.value = first ? Object.keys(first.values) : []
+}
+
+function formatTime(value: string): string {
+  return value.replace('T', ' ').replace(/\..*$/, '')
+}
+
+onMounted(() => {
+  reload()
+  if (!selectedDrill.value && rows.value.length) {
+    selectedDrill.value = String(rows.value[0]['路径编号'] ?? '')
+  }
+  loadDrill()
+})
 </script>
+
+<style scoped>
+.drill-link {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+.drill-link-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.drill-link-head h3 { margin: 0 0 4px; font-size: 14px; }
+.drill-summary { display: flex; gap: 8px; margin: 8px 0; }
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: var(--muted);
+  font-size: 12px;
+}
+.filter-item.inline { display: flex; align-items: center; gap: 6px; }
+.muted { color: var(--muted); font-size: 12px; }
+.linked-results { margin-top: 12px; }
+.data-table.compact th,
+.data-table.compact td { padding: 5px 8px; font-size: 12px; }
+</style>

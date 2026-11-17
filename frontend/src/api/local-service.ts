@@ -1,6 +1,25 @@
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
+import {
+  filterRuleEntries,
+  resetFilterState,
+  syncFilterRuleEntries,
+} from '@/api/filter-service'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
+
+export {
+  applyDatasetFieldChange,
+  decideConflict,
+  interruptRevalidation,
+  loadDrillWorkspace,
+  loadFilterWorkspace,
+  reorderRuleResult,
+  resumeRevalidation,
+  seedAmountChange,
+  seedDiscountChange,
+  submitRule,
+} from './filter-service'
+export type { ReorderInput } from './filter-service'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
 const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
@@ -24,7 +43,8 @@ export function filterRows(rows: EntryRow[], filters: Record<string, string>): E
 }
 
 export function listEntries(key: string, filters: Record<string, string> = {}): PageResult {
-  const matched = filterRows(listRows(key), filters)
+  const source = key === 'filter' ? filterRuleEntries() : listRows(key)
+  const matched = filterRows(source, filters)
   return { items: matched, total: matched.length, page: 1, size: matched.length }
 }
 
@@ -53,11 +73,19 @@ export function runAction(key: string, id: number, action: string): ActionResult
   const next = [...rows]
   next[index] = updated
   saveRows(key, next)
+  if (key === 'filter') {
+    // 状态流转写回筛选域，规则版本与结果明细跟着一次同步。
+    syncFilterRuleEntries()
+  }
   return { ok: true, message: `${meta.entity}已${action}，当前状态「${target}」` }
 }
 
 export function resetModule(key: string): PageResult {
   resetRows(key)
+  if (key === 'filter') {
+    resetFilterState()
+    syncFilterRuleEntries()
+  }
   return listEntries(key)
 }
 
